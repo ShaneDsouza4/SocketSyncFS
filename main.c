@@ -21,6 +21,77 @@
 #include <dirent.h>
 #define MAX_LEN 1024
 
+//Glbal Variabe to keep track if fles exists in the swrver directiry
+bool cFilesExist = false;
+
+// Utility funcion to brek down comands into indivydal commsnds to prepare for execution
+void commandSplitter(char *input, char **commandArgv, int *commandArgc) {
+    int index = 0;
+    char *currentCmd;
+
+    //Iterates and seperate the commands based on " " identified
+    while ((currentCmd = strsep(&input, " ")) != NULL) { 
+        if (*currentCmd != '\0') { //Empty check
+            commandArgv[index] = currentCmd; //Adds cCarrent cmmand in argv
+            //printf("Arg Index---> %s\n", argv[index]);
+            index++;
+        }
+    }
+
+    commandArgv[index] = NULL; // Addin Null terminate the last index is necessaru
+    *commandArgc = index; //Assigning the value of index as count ref
+}
+
+//Utility Functon to chck if a specifc file existss in the directory
+bool checkIfFileExists(const char *filepath){
+    struct stat fileInfo; // Stat func gets directory info
+
+    // S_ISREG macro chek the file mode to determinee if it's a file
+    return (stat(filepath, &fileInfo) == 0 && S_ISREG(fileInfo.st_mode)) ? true : false;
+}
+
+//Utility function to eztract a file name from a path
+const char* extractFileName(const char* path){
+    const char *fileName = NULL;
+    for(int i = strlen(path); i>=0; i--){
+        if(path[i] == '/'){ //abc.pdf => .pdf
+            fileName = &path[i]; //Store in the pathExt variable
+            break; // Exit the loop
+        }
+    }
+    return fileName;
+}
+
+//Utiity function to constuct the ful absolute pth
+char *constructFullPath(const char *path){
+    
+    //Get the curent pwd
+    char pwd[MAX_LEN];
+    if (getcwd(pwd, sizeof(pwd)) != NULL) {
+
+        //Constructig the full absolute path
+        static char fullPath[200];
+        strcpy(fullPath, pwd);
+        strcat(fullPath, path + 6); //Add after ~smain
+        return fullPath;
+    }else{
+        printf("Current Working Directory can not be determined.\n");  
+    }
+}
+
+//Utilit funcion to get the extwnsion of a file by checkong it backwards
+const char* getFileExtension(const char *fullPath) {
+    const char *pathExt = NULL;
+    for(int i = strlen(fullPath) - 1; i >= 0; i--) {
+        if(fullPath[i] == '.') { // Find the lst dot in the path
+            pathExt = &fullPath[i];
+            break; // Exit thr loop oce the extension is found
+        }
+    }
+    return pathExt;
+}
+
+
 int main(int argc, char *argv[]) {
 
     int sd, client, portNumber;
