@@ -249,6 +249,50 @@ char* createDestinationPath(const char *filePath) {
     return destinationPath;
 }
 
+//Function to download a fil received from the server onto the client pwd
+void downloadingFile(int server, const char *filePath){
+
+    //Constructng the destinatin directory
+    char *destinationPath = createDestinationPath(filePath);
+    if (destinationPath == NULL) {
+        printf("Download path could not be created.\n");
+        return;
+    }
+    
+    char buffer[MAXSIZE];
+    long int bytesRead;
+
+    // Opens File Descrptor in Read Only from the soufce file
+    umask(0000);
+    int fdDest = open(destinationPath, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+    if (fdDest < 0) { //Error Check
+        printf("Error occured while creating file.\n");
+        return;
+    }
+
+    // Rece9ive data and write into a destination file
+    int chunksSent = 0;
+    while ( ( bytesRead = recv(server, buffer, sizeof(buffer), 0)) > 0) { //Read up to 1024 bytes in chunks from the server
+        long int bytesWrite = write(fdDest, buffer, bytesRead); //Writing to the dest file
+        if (bytesWrite < 0) { //Iff err occurs during write
+            printf("Error occured when writing to destination file");
+            close(fdDest);
+            return;
+        }else{
+            //Checking file size based on chinks
+            chunksSent = chunksSent + 1;
+            if(chunksSent > 16000){ //16mb
+                //printf("File size exceeds 16mb\n");
+            }
+        }
+        // Clear buffer
+        memset(buffer, 0, sizeof(buffer));    
+    }
+    //If errr occus when readong from the data sent by server
+    (bytesRead < 0) ? printf("Error occured while receiving file from server\n") : printf("File transfered successfully.\n");
+
+    close(fdDest);
+}
 
 int main(int argc, char *argv[]){
 
