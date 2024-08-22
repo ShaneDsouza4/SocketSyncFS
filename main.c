@@ -21,6 +21,9 @@
 #include <dirent.h>
 #define MAX_LEN 1024
 
+// Function declared to connect to the server
+int connecttoserver(char* command, char* servername);
+
 //Glbal Variabe to keep track if fles exists in the swrver directiry
 bool cFilesExist = false;
 
@@ -89,25 +92,6 @@ const char* getFileExtension(const char *fullPath) {
         }
     }
     return pathExt;
-}
-
-//Function to cgeck if a file is present as only .c files wil exist on the msin server
-int containsCFiles(const char *filePath, const struct stat *FileInfo, int flag, struct FTW *ftwInfo){
-    
-    if(flag == FTW_F){ // Checks if is a File
-        //printf("File Path Found: %s\n", filePath);
-
-        //Extrct extension frm psth and deteminw if is a .c file
-        const char *pathExt = getFileExtension(filePath); 
-        if(pathExt != NULL && strcmp(pathExt, ".c") == 0){
-            cFilesExist = true;
-            return 1;
-        }else{
-            return 0;
-        }
-    }else{
-        return 0;
-    }
 }
 
 //Function that rwads a C fils and trnsfer it to the client
@@ -181,6 +165,134 @@ void downloadCFiles(const char *fullPath, int client){
     }
 }
 
+//Function to downlad files from tet and pdf server
+//Then transfera to client
+void downloadFromServers(char* command, char* servername, int client) {
+    
+    int server = connecttoserver(command, servername);
+    if (server < 0) {
+        printf("\nError establishing connection to %s server\n", servername);
+        return;
+        //return -1;
+    }
+
+    char fileBuffer[MAX_LEN];
+    char serverRes[MAX_LEN];
+    long int bytesRead = read(server, serverRes, MAX_LEN - 1); //Reads the indicator sen from the txt/pf severs
+    long int bytesSent;
+    
+    if (bytesRead < 0) {
+        printf("Client: read() failure\n");
+        exit(3);
+    }
+    serverRes[bytesRead] = '\0';
+    printf("External Server: %s\n", serverRes);
+
+    //Of dfile is received, sending to client
+    if (strcmp(serverRes, "dfile") == 0){
+
+        // SendINF "dfile" to client and wait for acknowledgment
+        write(client, "dfile", strlen("dfile") +1);
+
+        char ackBuffer[9];
+        if (recv(client, ackBuffer, sizeof(ackBuffer) - 1, 0) < 0) {
+            printf("Error receiving acknowledgment from client\n");
+            close(server);
+            return;
+        }
+
+        ackBuffer[8] = '\0';
+        if (strcmp(ackBuffer, "SendFile") != 0) {
+            printf("Invalid acknowledgment from client\n");
+            close(server);
+            return;
+        }
+
+        // Forwared the acknowledgment to the PDF servere
+        if (send(server, ackBuffer, strlen(ackBuffer), 0) < 0) {
+            printf("Error sending acknowledgment to PDF/TXT server\n");
+            close(server);
+            return;
+        }
+
+        //Forward the file from PDF server to client
+        int chunksSent = 0;
+        while( ( bytesRead = read(server, fileBuffer, sizeof(fileBuffer) ) ) > 0 ){ //Read up to 1024 bytes in chunks from the server
+            long int bytesSent = send(client, fileBuffer, bytesRead, 0); //Sendin to the dest file
+            if (bytesSent < 0) {  //0 bytes must not be sent, must always be more then 0
+                printf("Error in sending file\n");
+                close(server);
+                return;    
+            }else{
+                //Checking file size based on chinks
+                chunksSent = chunksSent + 1;
+                if(chunksSent > 16000){ //16mb
+                    //printf("File size exceeds 16mb\n");
+                }
+            }
+            
+            // Clear buffer
+            memset(fileBuffer, 0, sizeof(fileBuffer));
+        }
+        //Error check
+        (bytesRead < 0) ? printf("Error occured while receiving file from server\n") : printf("File transfered successfully.\n");
+    }
+    else if (strstr(serverRes, ".tar")) { //if dtar is received, means it has to expect a download tar file      
+
+        // Sendingg tar file name to client and wait for acknowledgment
+        write(client, serverRes, strlen(serverRes) + 1);
+
+        char ackBuffer[9];
+        if (recv(client, ackBuffer, sizeof(ackBuffer) - 1, 0) < 0) {
+            printf("Error receiving acknowledgment from client\n");
+            close(server);
+            return;
+        }
+
+        ackBuffer[8] = '\0';
+        if (strcmp(ackBuffer, "SendFile") != 0) {
+            printf("Invalid acknowledgment from client\n");
+            close(server);
+            return;
+        }
+
+        // Forw2ard the acknowledgment to the PDF server
+        if (send(server, ackBuffer, strlen(ackBuffer), 0) < 0) {
+            printf("Error sending acknowledgment to PDF/TEXT server\n");
+            close(server);
+            return;
+        }
+
+        // ForwardingE the tar filee from PDF server to client
+        int chunksSent = 0;
+        while( ( bytesRead = read(server, fileBuffer, sizeof(fileBuffer) ) ) > 0 ){ //Read up to 1024 bytes in chunks from the server
+            long int bytesSent = send(client, fileBuffer, bytesRead, 0); //Writing to the dest file
+            if (bytesSent < 0) {  //Iff err occurs during write
+                printf("Error in sending file\n");
+                close(server);
+                return;    
+            }else{
+                //Checking file size based on chinks
+                chunksSent = chunksSent + 1;
+                if(chunksSent > 16000){ //16mb
+                    //printf("File size exceeds 16mb\n");
+                }
+            }
+            
+            // Clear buffer
+            memset(fileBuffer, 0, sizeof(fileBuffer));
+        }
+
+        //Error check
+        (bytesRead < 0) ? printf("Error occured while receiving file from server\n") : printf("File transfered successfully.\n");
+    }
+    else{ //Incase of error mesages
+        write(client, serverRes, strlen(serverRes) + 1);
+    }
+    
+    close(server);
+}
+
 // Function to initiate downloading a file from the respevted serer and transfred to the client
 void downloadHandler(char **commandArgv, int commandArgc, int client){
     
@@ -203,8 +315,129 @@ void downloadHandler(char **commandArgv, int commandArgc, int client){
     //File extenson check to see which server to send to
     if (strcmp(pathExt, ".c") == 0) {
         downloadCFiles(fullPath, client);
-    } 
+    } else if (strcmp(pathExt, ".txt") == 0) {
+        downloadFromServers(buffer, "txt" , client);
+    } else if (strcmp(pathExt, ".pdf") == 0) {
+        downloadFromServers(buffer, "pdf" , client);
+    }
     
+}
+
+//Function t remove thr specific C file from the smain directory
+void removeCFiles(const char *fullPath, int client){
+
+    //First check if file eists in the directory
+    if(!checkIfFileExists(fullPath)){
+        printf("File does not exist!\n");
+        char *msg = "File does not exist on the server.";
+        write(client, msg, strlen(msg) + 1);
+        return;
+    }else{ 
+        //Remove the file using the remove
+        if (remove(fullPath) == -1) { 
+            printf("Could not remove File\n");
+            char *msg = "Could not remove file from server.";
+            write(client, msg, strlen(msg) + 1);
+            return;
+        }else{
+            printf("File Removal Success.");
+            char *msg = "File removed succesfully from server.";
+            write(client, msg, strlen(msg) + 1);
+        }
+    }
+}
+
+//Function to determine which server will process the removal
+int removeHandler(char **commandArgv, int commandArgc, int client){
+
+    //Converting argv into a single command with spaes after each command
+    char buffer[MAX_LEN];
+    buffer[0] = '\0';
+    for (int i = 0; i < commandArgc; i++) {
+        strcat(buffer, commandArgv[i]);  
+        if (i < commandArgc - 1) { //Add space after every command
+            strcat(buffer, " "); 
+        }
+    }
+    
+    //Creating full path and getting the entension
+    const char *fullPath = constructFullPath(commandArgv[1]);
+    const char *pathExt = getFileExtension(fullPath);
+
+    //Check the extension to deteemine if c txt or pdf
+    if(pathExt != NULL){ 
+        if (strcmp(pathExt, ".c") == 0) {
+            // To remove .c file
+            removeCFiles(fullPath, client);
+            
+        }else if (strcmp(pathExt, ".txt") == 0) {
+            // To remove .txt file
+            downloadFromServers(buffer, "txt" , client);
+        } else if (strcmp(pathExt, ".pdf") == 0) {
+            // To remove .pdf file
+            char *mainfolder = "~smain";
+
+            char command[MAX_LEN];
+
+            char path[MAX_LEN];
+            // constructing command to send to server
+            strcpy(path, commandArgv[1] + strlen(mainfolder) + 1);
+            strcpy(command, commandArgv[0]);
+            strcat(command, " ");
+            strcat(command, path);
+            strcat(command, " ");
+
+            int server = connecttoserver(command, "pdf"); // connecting to pdf server
+            if (server < 0) {
+                printf("\nError establishing connection to pdf server\n");
+                return -1;
+            }
+            char status[1];
+            int recvstatusbytes = recv(server, status, 1, 0); // get status from server
+            if(recvstatusbytes < 0) {
+                printf("\nError deleting file\n");
+                close(server);
+                return -1;
+            }
+            // check if successful or not and send appropriate message to client
+            if(status[0] == '0') {
+                printf("\nFile does not exist\n");
+                char *msg = "File does not exist on the server.";
+                write(client, msg, strlen(msg) + 1);
+            }
+            else {
+                printf("\nFile removed succesfully from server\n");
+                char *msg = "File removed succesfully from server.";
+                write(client, msg, strlen(msg) + 1);
+            }
+            close(server);
+        }
+    }else{ //If an extnsion is detected that is not valid & sending error message to clien
+        printf("Invalid file extension provided.\n");
+        char *msg = "Invalid file extension provided.";
+        write(client, msg, strlen(msg) + 1); 
+        return -1;
+    }
+    return 0;
+}
+
+//Function to cgeck if a file is present as only .c files wil exist on the msin server
+int containsCFiles(const char *filePath, const struct stat *FileInfo, int flag, struct FTW *ftwInfo){
+    
+    if(flag == FTW_F){ // Checks if is a File
+        //printf("File Path Found: %s\n", filePath);
+
+        //Extrct extension frm psth and deteminw if is a .c file
+        const char *pathExt = getFileExtension(filePath); 
+        if(pathExt != NULL && strcmp(pathExt, ".c") == 0){
+            cFilesExist = true;
+            return 1;
+        }else{
+            return 0;
+        }
+    }else{
+        return 0;
+    }
 }
 
 //Functio to create .c tar files and send to client
@@ -342,102 +575,375 @@ void tarHandler(char **commandArgv, int commandArgc, int client){
     }
 }
 
-//Function t remove thr specific C file from the smain directory
-void removeCFiles(const char *fullPath, int client){
+// Function to connect to pdf and text servers and send command entered by user
+int connecttoserver(char* command, char* servername) {
+    int server;
+    char* port = strcmp(servername, "pdf") == 0? "9533": "9534"; // pdf server is on port 9533 while text is on port 9534
+    char* ipaddr = "127.0.0.1";
+    int portNumber;
+    struct sockaddr_in servAdd;
 
-    //First check if file eists in the directory
-    if(!checkIfFileExists(fullPath)){
-        printf("File does not exist!\n");
-        char *msg = "File does not exist on the server.";
-        write(client, msg, strlen(msg) + 1);
-        return;
-    }else{ 
-        //Remove the file using the remove
-        if (remove(fullPath) == -1) { 
-            printf("Could not remove File\n");
-            char *msg = "Could not remove file from server.";
-            write(client, msg, strlen(msg) + 1);
-            return;
-        }else{
-            printf("File Removal Success.");
-            char *msg = "File removed succesfully from server.";
-            write(client, msg, strlen(msg) + 1);
-        }
+    if ((server = socket(AF_INET, SOCK_STREAM, 0)) < 0) { //socket()
+        fprintf(stderr, "Cannot create socket\n");
+        return -1;
     }
-}
 
-//Function to determine which server will process the removal
-int removeHandler(char **commandArgv, int commandArgc, int client){
+    sscanf(port, "%d", &portNumber);
 
-    //Converting argv into a single command with spaes after each command
-    char buffer[MAX_LEN];
-    buffer[0] = '\0';
-    for (int i = 0; i < commandArgc; i++) {
-        strcat(buffer, commandArgv[i]);  
-        if (i < commandArgc - 1) { //Add space after every command
-            strcat(buffer, " "); 
-        }
+    servAdd.sin_family = AF_INET; //Internet 
+    servAdd.sin_port = htons((uint16_t) portNumber); //Port number
+
+    if (inet_pton(AF_INET, ipaddr, &servAdd.sin_addr) < 0) {
+        fprintf(stderr, " inet_pton() has failed\n");
+        return -1;
+    }
+
+    if (connect(server, (struct sockaddr* ) &servAdd, sizeof(servAdd)) < 0) { //Connect()
+        fprintf(stderr, "connect() failed, exiting\n");
+        perror("connect failed");
+        return -1;
     }
     
-    //Creating full path and getting the entension
-    const char *fullPath = constructFullPath(commandArgv[1]);
-    const char *pathExt = getFileExtension(fullPath);
 
-    //Check the extension to deteemine if c txt or pdf
-    if(pathExt != NULL){ 
-        if (strcmp(pathExt, ".c") == 0) {
-            // To remove .c file
-            removeCFiles(fullPath, client);
-            
-        }else if (strcmp(pathExt, ".txt") == 0) {
-            // To remove .txt file
-            downloadFromServers(buffer, "txt" , client);
-        } else if (strcmp(pathExt, ".pdf") == 0) {
-            // To remove .pdf file
-            char *mainfolder = "~smain";
+    write(server, command, strlen(command) + 1); // send command
+
+    return server;
+}
+
+// Function to get file names for display command for pdf and text servers and send to client
+int getfilesfromserver(char* command, char* servername, int client) {
+    int server = connecttoserver(command, servername);
+    if (server < 0) {
+        printf("\nError establishing connection to %s server\n", servername);
+        return -1;
+    }
+
+    char filename[MAX_LEN];
+    int sizereceived;
+    while(((sizereceived = recv(server, filename, MAX_LEN, 0))) > 0) {
+        filename[sizereceived] = '\0';
+        if(strcmp(filename, "complete") == 0) {
+            break;
+        } 
+        else {
+            int n = send(client, filename, strlen(filename), 0);
+            if(n < 0) {
+                printf("Display to client failed\n");
+                return -1;
+            }
+        }
+    }
+
+    close(server);
+    return 0;
+}
+
+// Function for display command to send files to client 
+int listfiles(char* userpath, int client) {
+
+    char path[MAX_LEN];
+    char *mainfolder = "~smain";
+    int pathprovided = 1;
+
+    // getting path
+    if (strcmp(userpath, mainfolder) == 0)
+    {
+        pathprovided=0;
+        strcpy(path, "./");
+    }
+    else
+        strcpy(path, userpath + strlen(mainfolder) + 1);
+
+    // getting files from main server
+    struct stat st;
+    if(stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        printf("\nDirectory path does not exist in smain");
+    }
+    else {
+        DIR* directory;
+        if (!(directory = opendir(path))) {
+            perror("Error opening directory");
+            return 1;
+        }
+        for(struct dirent *direntry = readdir(directory); direntry != NULL; direntry = readdir(directory)) {
+
+            if (strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0) {
+            continue;
+        }
+
+            char new_path[MAX_LEN];
+            snprintf(new_path, sizeof(new_path), "%s/%s", path, direntry->d_name);
+
+        if (direntry->d_type == DT_REG) {
+            printf("%s\n", direntry->d_name);
+            int n = send(client, direntry->d_name, strlen(direntry->d_name), 0);
+            if(n < 0) {
+                printf("Display to client failed\n");
+                return 1;
+            }
+            sleep(0.5);
+        }
+        }
+        closedir(directory);
+    }
+
+    char command[MAX_LEN];
+
+    strcpy(command, "display");
+    strcat(command, " ");
+    strcat(command, path);
+    command[strlen(command)] = '\0';
+
+    // getting files from pdf server
+    int serverstatus = getfilesfromserver(command, "pdf", client);
+    if(serverstatus < 0) {
+        printf("\nError getting files from Pdf Server\n");
+    }
+
+    // getting files from text server
+    serverstatus = getfilesfromserver(command, "text", client);
+    if(serverstatus < 0) {
+        printf("\nError getting files from Text Server\n");
+    }
+
+
+    char complete[50] = "complete";
+    complete[strlen(complete)] = '\0';
+    int n = send(client, complete, strlen(complete), 0);
+    if (n < 0)
+    {
+        printf("Display to client failed\n");
+        return 1;
+    }
+    sleep(0.5);
+
+    return 0;
+
+}
+
+// Function to upload file to pdf or text server
+int uploadtoserver(int client, int server) {
+    int filesize;
+    char filesizebuf[MAX_LEN];
+    char sendbytesmessage[MAX_LEN];
+
+    if(recv(server, sendbytesmessage, 8, 0) < 0) {
+        printf("\nRecv failed: Unable to send files to server\n");
+        return 1;
+    }
+
+    // getting file size from client and sending to the server
+    char* sendmessage = "sendsize";
+    int sendmessagebytes = send(client, sendmessage, strlen(sendmessage), 0);
+    if (sendmessagebytes < 0) {
+        printf("\nError in send bytes message\n");
+        return 1;
+    }
+    // get size of file
+    int recbytes = read(client, filesizebuf, MAX_LEN);
+    if (recbytes < 0) {
+        printf("\nError receiving filesize\n");
+        return 1;
+    }
+
+    filesize = atoi(filesizebuf);
+
+    int n;
+
+    n = send(server, filesizebuf, strlen(filesizebuf), 0);
+
+    if (n < 0) {
+        printf("\nSend filesize to server failed\n");
+        return 1;
+    }
+
+    char confirmation[8];
+    int recvconfirm = recv(server, confirmation, 8, 0);
+    if (recvconfirm < 0) {
+        printf("\nError uploading file\n");
+        return 1;
+    }
+
+    char* message = "received";
+    send(client, message, strlen(message), 0);
+
+    // receiving bytes from client and sending to server
+    int totalbytesread = 0;
+    char filebuf[MAX_LEN];
+    while (totalbytesread < filesize) {
+        int bytesread = recv(client, filebuf, MAX_LEN, 0);
+        totalbytesread += bytesread;
+        int n = send(server, filebuf, bytesread, 0);
+        if (n < 0) {
+            printf("\nWrite Failed\n");
+        }
+    }
+
+    return 0;
+}
+
+// If file needs to be uploaded to main server
+int uploadtomain(int client, char* destpath, int pathprovided, char* filename) {
+    struct stat st;
+    // Check if the directory exists
+    if (pathprovided && (stat(destpath, &st) != 0 || !S_ISDIR(st.st_mode))) {
+        // If directory does not exist, attempt to create it
+        char newpath[MAX_LEN] = "";
+        int count = 0;
+        char temppath[MAX_LEN];
+        strcpy(temppath, destpath);
+        for (char* separator = strtok(temppath, "/"); separator != NULL; separator = strtok(NULL, "/"), count += 1) {
+            if (count != 0)
+                strcat(newpath, "/");
+            strcat(newpath, separator);
+            if (stat(newpath, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                if (mkdir(newpath, 0700) != 0) {
+                    perror("mkdir failed");
+                    return -1;
+                }
+            }
+        }
+    }
+
+    int filesize;
+    char filesizebuf[MAX_LEN];
+
+    // Informing client to send size of file
+    char* sendmessage = "sendsize";
+    int sendmessagebytes = send(client, sendmessage, strlen(sendmessage), 0);
+    if (sendmessagebytes < 0) {
+        printf("\nError in send bytes message\n");
+        return 1;
+    }
+
+    // Get size of file
+    int recbytes = read(client, filesizebuf, MAX_LEN);
+    if (recbytes < 0) {
+        printf("\nError receiving filesize\n");
+        return 1;
+    }
+
+    filesize = atoi(filesizebuf);
+    if (pathprovided) {
+        strcat(destpath, "/");
+        strcat(destpath, filename);
+    } else
+        strcpy(destpath, filename);
+
+    int fd = open(destpath, O_CREAT | O_RDWR | O_APPEND, 0777);
+    if (fd < -1) {
+        printf("\nError opening file\n");
+        return 1;
+    }
+    int totalbytesread = 0;
+    char filebuf[MAX_LEN];
+
+    char* message = "received";
+    send(client, message, strlen(message), 0);
+
+    // get file bytes from client
+    while (totalbytesread < filesize) {
+        int bytesread = recv(client, filebuf, MAX_LEN, 0);
+        totalbytesread += bytesread;
+        int writebytes = write(fd, filebuf, bytesread);
+        if (writebytes < 0) {
+            printf("\nError writing file\n");
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+// Function called if file needs to be uploaded to server
+int ufilecommand(char* cmd, char* filename, char* dest, int client) {
+    char* mainfolder = "~smain";
+    char servername[5];
+    char destpath[MAX_LEN];
+    if (strncmp(dest, mainfolder, strlen(mainfolder)) == 0) {
+        int pathprovided = 1;
+        if (strcmp(dest, mainfolder) == 0) {
+            pathprovided = 0;
+            strcpy(destpath, "");
+        } else
+            strcpy(destpath, dest + strlen(mainfolder) + 1);
+
+        struct stat st;
+
+        int server;
+        char ext[5];
+        char* dot = strrchr(filename, '.');
+        if (!dot || dot == filename) {
+            strcpy(ext, "");
+        } else strcpy(ext, dot + 1);
+
+        if (strcmp(ext, "txt") == 0) { // if text file needs to be ploaded
+            strcpy(servername, "text");
 
             char command[MAX_LEN];
 
-            char path[MAX_LEN];
-            // constructing command to send to server
-            strcpy(path, commandArgv[1] + strlen(mainfolder) + 1);
-            strcpy(command, commandArgv[0]);
+            strcpy(command, cmd);
             strcat(command, " ");
-            strcat(command, path);
+            strcat(command, filename);
             strcat(command, " ");
+            if (pathprovided)
+                strcat(command, destpath);
+            else
+                strcat(command, "/");
 
-            int server = connecttoserver(command, "pdf"); // connecting to pdf server
-            if (server < 0) {
-                printf("\nError establishing connection to pdf server\n");
-                return -1;
+            server = connecttoserver(command, servername);
+
+            if(server < 0) {
+                printf("\nError establishing connection to text server\n");
+                return 1;
             }
-            char status[1];
-            int recvstatusbytes = recv(server, status, 1, 0); // get status from server
-            if(recvstatusbytes < 0) {
-                printf("\nError deleting file\n");
-                close(server);
-                return -1;
-            }
-            // check if successful or not and send appropriate message to client
-            if(status[0] == '0') {
-                printf("\nFile does not exist\n");
-                char *msg = "File does not exist on the server.";
-                write(client, msg, strlen(msg) + 1);
-            }
-            else {
-                printf("\nFile removed succesfully from server\n");
-                char *msg = "File removed succesfully from server.";
-                write(client, msg, strlen(msg) + 1);
-            }
+
+            int serverstatus = uploadtoserver(client, server);
+
             close(server);
+            printf("\nCompleted Upload Functionality\n");
+            return serverstatus;
+        } else if (strcmp(ext, "pdf") == 0) { // if pdf needs to be uploaded
+            strcpy(servername, "pdf");
+             char command[MAX_LEN];
+
+            strcpy(command, cmd);
+            strcat(command, " ");
+            strcat(command, filename);
+            strcat(command, " ");
+            if (pathprovided)
+                strcat(command, destpath);
+            else
+                strcat(command, "/");
+
+
+
+            server = connecttoserver(command, servername);
+
+            if(server < 0) {
+                printf("\nError establishing connection to pdf server\n");
+                return 1;
+            }
+
+            int serverstatus = uploadtoserver(client, server);
+
+            close(server);
+            printf("\nCompleted Upload Functionality\n");
+            return serverstatus;
+        } else if (strcpy(servername, "c")) {
+            strcpy(servername, "main");
+        } else {
+            printf("\nInvalid file type\n");
+            return 1;
         }
-    }else{ //If an extnsion is detected that is not valid & sending error message to clien
-        printf("Invalid file extension provided.\n");
-        char *msg = "Invalid file extension provided.";
-        write(client, msg, strlen(msg) + 1); 
-        return -1;
+
+        // If file needs to be uploaded to main
+        if (strcmp(servername, "main") == 0) {
+            int uploadstatus = uploadtomain(client, destpath, pathprovided, filename);
+            printf("\nCompleted Upload Functionality\n");
+            return uploadstatus;
+        }
     }
-    return 0;
 }
 
 // Function to process client command
@@ -485,8 +991,7 @@ int prcclient(char* userinput, int client) {
 
     return 0;
 }
- 
-
+  
 int main(int argc, char *argv[]) {
 
     int sd, client, portNumber;
@@ -538,14 +1043,15 @@ int main(int argc, char *argv[]) {
                 exit(3);
             }
 
-            int success = prcclient(buff1, client);  // Process client's command
+        int success = prcclient(buff1, client);  // Process client's command
 
 
-            close(client);
-            printf("\n");
-            exit(0);
-        } else if (pid > 0) { // Parent continues to accept new connection
-            close(client);
-        }
+        close(client);
+        printf("\n");
+        exit(0);
+    } else if (pid > 0) { // Parent continues to accept new connection
+        close(client);
     }
+}
+
 }

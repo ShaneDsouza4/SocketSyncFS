@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -292,6 +293,127 @@ void downloadingFile(int server, const char *filePath){
     (bytesRead < 0) ? printf("Error occured while receiving file from server\n") : printf("File transfered successfully.\n");
 
     close(fdDest);
+}
+
+//Function will take server response and perform operation downloading operation
+void handleServerResponse(int server, char **commandArgv) {
+    char serverRes[MAXSIZE];
+
+    //Receive data the server
+    long int bytesRead = recv(server, serverRes, MAXSIZE - 1, 0); //-1 reserves space for Null terminator, 0 is a flag
+    if (bytesRead < 0) {
+        printf("Error receiving server response\n");
+        return;
+    }
+
+    serverRes[bytesRead] = '\0'; //Add Null teminator
+
+    //Check for indicators
+    if (strcmp(serverRes, "dfile") == 0) { //if dfile is received, means it has to expect a download
+        //printf("File transfer initiated by server.\n");
+        
+        //Send acknowledgement to main server
+        const char *ack = "SendFile";
+        if (send(server, ack, strlen(ack), 0) < 0) {
+            printf("Error sending acknowledgment to server\n");
+            return;
+        }
+        downloadingFile(server, commandArgv[1]);
+    } 
+    else if (strstr(serverRes, ".tar")) { //if dtar is received, means it has to expect a download tar file
+        //printf("Dtar transfer initiated by server.\n");
+
+        //Send acknowledgement to main server
+        const char *ack = "SendFile";
+        if (send(server, ack, strlen(ack), 0) < 0) {
+            printf("Error sending acknowledgment to server\n");
+            return;
+        }
+        downloadingFile(server, serverRes);
+    }else{ //Incase server has to send err messages
+        printf("Server: %s\n", serverRes);
+    }
+}
+
+// Function to display files from server for the display command
+int displayfiles(int socket) {
+    char filename[MAXSIZE];
+    printf("\nList of files\n");
+    int filespresent = 0;
+    int sizereceived;
+    // Receiving file names present in user specified path from server
+    while(((sizereceived = recv(socket, filename, MAXSIZE, 0))) > 0) {
+        filename[sizereceived] = '\0';
+        if(strcmp(filename, "complete") == 0) {
+            break;
+        } 
+        else {
+            printf("%s\n", filename);
+            filespresent = 1;
+        }
+    }
+
+    if(!filespresent) 
+    printf("\nNo Files present for the directory\n");
+}
+
+// Function to upload file from client to server
+int uploadfile(int socket, char* filename) {
+    int fd = open(filename, O_RDWR);
+    if(fd < 0) {
+        printf("\nfile does not exist\n");
+    }
+
+    // Getting size of file
+    int filelen = lseek(fd,0,SEEK_END);
+    lseek(fd,0,SEEK_SET);
+
+    char leninstr[50];
+
+    sprintf(leninstr, "%d", filelen); // converting to string to send to server
+
+
+    int n;
+    char sendmessage[MAXSIZE];
+
+    n= recv(socket, sendmessage, 8, 0);
+    if(n < 0) {
+        printf("\nRecv failed: Unable to send files to server\n");
+        close(fd);
+        return 1;
+    }
+
+    n= send(socket, leninstr, strlen(leninstr), 0);
+    if(n < 0) {
+        printf("\nSend filesize to server failed\n");
+        close(fd);
+        return 1;
+    }
+
+    // receiving confirmation that size is received
+    char confirmation[8];
+    int recvconfirm = recv(socket, confirmation, 8, 0);
+    if(recvconfirm < 0) {
+        printf("\nError uploading file\n");
+        close(fd);
+        return 1;
+    }
+
+    char readbuf[MAXSIZE];
+
+    int readbytes;
+
+    // reading file and sending bytes to server
+    while ((readbytes = read(fd, readbuf, MAXSIZE)) > 0) {
+        n = send(socket, readbuf, readbytes, 0);
+        if(n < 0) {
+            printf("\nWrite Failed\n");
+        }
+    }
+
+
+    close(fd);
+    return 0;
 }
 
 int main(int argc, char *argv[]){
