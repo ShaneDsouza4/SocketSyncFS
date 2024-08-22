@@ -342,6 +342,104 @@ void tarHandler(char **commandArgv, int commandArgc, int client){
     }
 }
 
+//Function t remove thr specific C file from the smain directory
+void removeCFiles(const char *fullPath, int client){
+
+    //First check if file eists in the directory
+    if(!checkIfFileExists(fullPath)){
+        printf("File does not exist!\n");
+        char *msg = "File does not exist on the server.";
+        write(client, msg, strlen(msg) + 1);
+        return;
+    }else{ 
+        //Remove the file using the remove
+        if (remove(fullPath) == -1) { 
+            printf("Could not remove File\n");
+            char *msg = "Could not remove file from server.";
+            write(client, msg, strlen(msg) + 1);
+            return;
+        }else{
+            printf("File Removal Success.");
+            char *msg = "File removed succesfully from server.";
+            write(client, msg, strlen(msg) + 1);
+        }
+    }
+}
+
+//Function to determine which server will process the removal
+int removeHandler(char **commandArgv, int commandArgc, int client){
+
+    //Converting argv into a single command with spaes after each command
+    char buffer[MAX_LEN];
+    buffer[0] = '\0';
+    for (int i = 0; i < commandArgc; i++) {
+        strcat(buffer, commandArgv[i]);  
+        if (i < commandArgc - 1) { //Add space after every command
+            strcat(buffer, " "); 
+        }
+    }
+    
+    //Creating full path and getting the entension
+    const char *fullPath = constructFullPath(commandArgv[1]);
+    const char *pathExt = getFileExtension(fullPath);
+
+    //Check the extension to deteemine if c txt or pdf
+    if(pathExt != NULL){ 
+        if (strcmp(pathExt, ".c") == 0) {
+            // To remove .c file
+            removeCFiles(fullPath, client);
+            
+        }else if (strcmp(pathExt, ".txt") == 0) {
+            // To remove .txt file
+            downloadFromServers(buffer, "txt" , client);
+        } else if (strcmp(pathExt, ".pdf") == 0) {
+            // To remove .pdf file
+            char *mainfolder = "~smain";
+
+            char command[MAX_LEN];
+
+            char path[MAX_LEN];
+            // constructing command to send to server
+            strcpy(path, commandArgv[1] + strlen(mainfolder) + 1);
+            strcpy(command, commandArgv[0]);
+            strcat(command, " ");
+            strcat(command, path);
+            strcat(command, " ");
+
+            int server = connecttoserver(command, "pdf"); // connecting to pdf server
+            if (server < 0) {
+                printf("\nError establishing connection to pdf server\n");
+                return -1;
+            }
+            char status[1];
+            int recvstatusbytes = recv(server, status, 1, 0); // get status from server
+            if(recvstatusbytes < 0) {
+                printf("\nError deleting file\n");
+                close(server);
+                return -1;
+            }
+            // check if successful or not and send appropriate message to client
+            if(status[0] == '0') {
+                printf("\nFile does not exist\n");
+                char *msg = "File does not exist on the server.";
+                write(client, msg, strlen(msg) + 1);
+            }
+            else {
+                printf("\nFile removed succesfully from server\n");
+                char *msg = "File removed succesfully from server.";
+                write(client, msg, strlen(msg) + 1);
+            }
+            close(server);
+        }
+    }else{ //If an extnsion is detected that is not valid & sending error message to clien
+        printf("Invalid file extension provided.\n");
+        char *msg = "Invalid file extension provided.";
+        write(client, msg, strlen(msg) + 1); 
+        return -1;
+    }
+    return 0;
+}
+
 // Function to process client command
 int prcclient(char* userinput, int client) {
     char cmd[MAX_LEN];
@@ -352,6 +450,20 @@ int prcclient(char* userinput, int client) {
     sscanf(userinput, "%s %s %s", cmd, filename, dest);
     printf("%s, %s, %s\n", cmd, filename, dest);
 
+    // ufile command
+    if (strcmp(cmd, "ufile") == 0) {
+        int success = ufilecommand(cmd, filename, dest, client);
+        if (success == 0) {
+            char * message = "Upload Successful";
+            send(client, message, strlen(message), 0);
+        } else {
+            char * message = "Upload Failed";
+            send(client, message, strlen(message), 0);
+        }
+    } else if (strcmp(cmd, "display") == 0) { // display command
+        int success = listfiles(filename, client);
+    }
+
     //Splitting command into individual commands for executionn
     int commandArgc  = 0;
     char *commandArgv[200]; 
@@ -361,6 +473,10 @@ int prcclient(char* userinput, int client) {
     if(strcmp(commandArgv[0], "dfile") == 0){ //If command starts with dfile, user wants to download a file
         //printf("Processing for dfile\n");
         downloadHandler(commandArgv, commandArgc, client);
+    }
+    else if(strcmp(commandArgv[0], "rmfile") == 0){ //If command starts with rmfile, user wants to remove a file
+        //printf("Processing for rmile\n");
+        removeHandler(commandArgv, commandArgc, client);
     }
     else if(strcmp(commandArgv[0], "dtar") == 0){ //If command starts with dtar, user wants to download a tar file
         //printf("Processing for dtar\n");

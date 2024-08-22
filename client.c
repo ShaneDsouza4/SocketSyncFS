@@ -316,13 +316,31 @@ int main(int argc, char *argv[]){
 
     while(1){ //Infinite loop start
 
-        int server;
-        int portNumber;
-        char message[MAXSIZE];
-        struct sockaddr_in servAdd;
-        char userCommand[MAXSIZE];
-        int commandArgc  = 0;
-        char *commandArgv[200]; 
+    int server;
+    int portNumber;
+    char message[MAXSIZE];
+    struct sockaddr_in servAdd;
+    char userCommand[MAXSIZE];
+    int commandArgc  = 0;
+    char *commandArgv[200]; 
+
+        
+        bool validInput = false;
+
+        while(!validInput){
+            //Get user command
+            printf("\nEnter command:\n");
+            fgets(userCommand, sizeof(userCommand), stdin);
+
+            //Trimming the string and removing new line that gets added with fgets
+            trimAndRemoveNewLine(userCommand); 
+
+            //Split user commands into individual commands
+            commandSplitter(userCommand, commandArgv, &commandArgc);
+
+            //Check if user input is valid
+            validInput = checkInput(commandArgv, commandArgc);
+        }
 
 
         //Converting individual args into a single buffer
@@ -336,26 +354,26 @@ int main(int argc, char *argv[]){
         }
 
         //Create Socket
-        if( (server = socket(AF_INET, SOCK_STREAM, 0)) < 0 ){
-            printf("Failed to create Socket.\n");
-            exit(2);
-        }
+    if( (server = socket(AF_INET, SOCK_STREAM, 0)) < 0 ){
+        printf("Failed to create Socket.\n");
+        exit(2);
+    }
 
-        //Connecting IP and PORT Number on Server Object.
-        servAdd.sin_family = AF_INET; //Internet
-        sscanf(argv[2], "%d", &portNumber);
-        servAdd.sin_port = htons((uint16_t)portNumber);//Port number
+    //Connecting IP and PORT Number on Server Object.
+    servAdd.sin_family = AF_INET; //Internet
+    sscanf(argv[2], "%d", &portNumber);
+    servAdd.sin_port = htons((uint16_t)portNumber);//Port number
 
-        if( inet_pton(AF_INET, argv[1], &servAdd.sin_addr) < 0 ){ //IP Address Connection
-            printf("inet_pton() failure.\n");
-            exit(3);
-        }
+    if( inet_pton(AF_INET, argv[1], &servAdd.sin_addr) < 0 ){ //IP Address Connection
+        printf("inet_pton() failure.\n");
+        exit(3);
+    }
 
-        //Connect System Call
-        if(connect(server, (struct sockaddr *) &servAdd,sizeof(servAdd))<0){//Connect()
-            printf("connect() failure.\n");
-            exit(4);
-        }
+    //Connect System Call
+    if(connect(server, (struct sockaddr *) &servAdd,sizeof(servAdd))<0){//Connect()
+        printf("connect() failure.\n");
+        exit(4);
+    }
 
         //write(server, userCommand, strlen(userCommand) + 1); // Include null terminator in write
         long int bytesWrite = write(server, buffer, strlen(buffer) + 1); // Include null terminator in write
@@ -364,16 +382,27 @@ int main(int argc, char *argv[]){
             exit(4);
         }
 
-        
-        //Read from pipe and display
-        int bytes_read = read(server, message, MAXSIZE - 1);
+        //Identifiers to furtherrr handle server responsees
+        if(strcmp(commandArgv[0], "ufile") == 0) { //ufile identifier
+            uploadfile(server, commandArgv[1]);
+            handleServerResponse(server, commandArgv);
+        }
+        else if(strcmp(commandArgv[0], "display") == 0) { //Dislay process identier
+            displayfiles(server);
+        }
+        else if(strcmp(commandArgv[0], "dtar") == 0 || strcmp(commandArgv[0], "dfile") == 0) { //dtar and dfile odentifier
+            handleServerResponse(server, commandArgv);
+        }
+        else if(strcmp(commandArgv[0], "rmfile") == 0){ //rmfile identifier
+            //Read from pipe and display
+            int bytes_read = read(server, message, MAXSIZE - 1);
             if (bytes_read < 0) {
                 printf("Client: read() failure\n");
                 exit(3);
             }
             message[bytes_read] = '\0';
             printf("Server: %s\n", message);
-
+        }
 
         close(server);
     } //Infinite loop end
