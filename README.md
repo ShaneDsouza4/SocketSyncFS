@@ -1,4 +1,4 @@
-# SocketSyncFS - File Management System with Server-Client Architecture
+# SocketSyncFS - File Management System with Client-Server Architecture
 
 This project implements a robust File Management System using a Server-Client architecture. It allows users to upload, download, delete, and list files on different servers, each dedicated to handling specific file types. The servers and the client communicate over TCP/IP, ensuring reliable data transmission and accurate file handling.
 
